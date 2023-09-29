@@ -463,21 +463,22 @@ double Potential() {
     
     Pot=0.;
     for (i=0; i<N; i++) {
-        for (j=0; j<N; j++) {
+        for (j=i + 1; j<N; j++) {
             
-            if (j!=i) {
+            //if (j!=i) {
                 r2=0.;
                 for (k=0; k<3; k++) {
                     r2 += (r[i][k]-r[j][k])*(r[i][k]-r[j][k]);
                 }
-                rnorm=sqrt(r2);
+                rnorm=sqrt(2 * r2);
                 quot=sigma/rnorm;
-                term1 = pow(quot,12.);
+
                 term2 = pow(quot,6.);
+                term1 = term2 * term2; //pow(quot, 12.);
                 
                 Pot += 4*epsilon*(term1 - term2);
                 
-            }
+            //}
         }
     }
     
