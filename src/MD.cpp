@@ -473,16 +473,16 @@ double Potential() {
                 rnorm=sqrt(2 * r2);
                 quot=sigma/rnorm;
 
-                term2 = pow(quot,6.);
+                term2 = quot * quot * quot * quot * quot * quot;
                 term1 = term2 * term2; //pow(quot, 12.);
                 
-                Pot += 4*epsilon*(term1 - term2);
+                Pot += (term1 - term2);
                 
             //}
         }
     }
     
-    return Pot;
+    return 4*epsilon*Pot;
 }
 
 
@@ -503,18 +503,22 @@ void computeAccelerations() {
     }
     for (i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
         for (j = i+1; j < N; j++) {
-            // initialize r^2 to zero
-            rSqd = 0;
-            
+
             for (k = 0; k < 3; k++) {
                 //  component-by-componenent position of i relative to j
                 rij[k] = r[i][k] - r[j][k];
                 //  sum of squares of the components
-                rSqd += rij[k] * rij[k];
+                //rSqd += rij[k] * rij[k];
             }
+
+            rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[0];
+
+            double rSev = rSqd * rSqd * rSqd;
+            double rEigh = rSev * rSqd;
             
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            f = 24 * (2 * pow(rSqd, -7) - pow(rSqd, -4));
+            f = 24 * (2 * (1 / (rEigh * rSev)) - (1 / rEigh));
+
             for (k = 0; k < 3; k++) {
                 //  from F = ma, where m = 1 in natural units!
                 a[i][k] += rij[k] * f;
