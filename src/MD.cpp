@@ -511,7 +511,7 @@ void computeAccelerations() {
                 //rSqd += rij[k] * rij[k];
             }
 
-            rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[0];
+            rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
 
             double rSev = rSqd * rSqd * rSqd;
             double rEigh = rSev * rSqd;
