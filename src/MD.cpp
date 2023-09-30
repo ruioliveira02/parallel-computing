@@ -468,7 +468,7 @@ double Potential() {
             //if (j!=i) {
                 r2=0.;
                 for (k=0; k<3; k++) {
-                    r2 += (r[i][k]-r[j][k]) * (r[i][k]-r[j][k]);
+                    r2 += (r[k][i]-r[k][j]) * (r[k][i]-r[k][j]);
                 }
                 //rnorm=sqrt(2 r2);
                 //quot=sigma/rnorm;
