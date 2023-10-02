@@ -65,16 +65,15 @@ void initialize();
 //  update positions and velocities using Velocity Verlet algorithm 
 //  print particle coordinates to file for rendering via VMD or other animation software
 //  return 'instantaneous pressure'
-double VelocityVerlet(double dt, int iter, FILE *fp);  
+double VelocityVerlet(double dt, int iter, FILE *fp, double *potential);  
 //  Compute Force using F = -dV/dr
 //  solve F = ma for use in Velocity Verlet
-void computeAccelerations();
+//  Returns potential energy of the system
+double computeAccelerations();
 //  Numerical Recipes function for generation gaussian distribution
 double gaussdist();
 //  Initialize velocities according to user-supplied initial Temperature (Tinit)
 void initializeVelocities();
-//  Compute total potential energy from particle coordinates
-double Potential();
 //  Compute mean squared velocity from particle velocities
 double MeanSquaredVelocity();
 //  Compute total kinetic energy from particle mass and velocities
@@ -300,7 +299,7 @@ int main()
         // This updates the positions and velocities using Newton's Laws
         // Also computes the Pressure as the sum of momentum changes from wall collisions / timestep
         // which is a Kinetic Theory of gasses concept of Pressure
-        Press = VelocityVerlet(dt, i+1, tfp);
+        Press = VelocityVerlet(dt, i+1, tfp, &PE);
         Press *= PressFac;
         
         //  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -310,7 +309,6 @@ int main()
         //  We would also like to use the IGL to try to see if we can extract the gas constant
         mvs = MeanSquaredVelocity();
         KE = Kinetic();
-        PE = Potential();
         
         // Temperature from Kinetic Theory
         Temp = m*mvs/(3*kB) * TempFac;
@@ -454,68 +452,14 @@ double Kinetic() { //Write Function here!
     
 }
 
-
-// Function to calculate the potential energy of the system
-double Potential() {
-    __m256d sigmaSq = _mm256_set1_pd(sigma * sigma);
-    __m256d ri[3], dif, quotSq, r2, term1, term2, Pot;
-    int i, j, k;
-    
-    Pot=_mm256_set1_pd(0.);
-    for (i=0; i<N; i++) {
-
-        for (k=0; k<3; k++) {
-            ri[k] = _mm256_set1_pd(r[k][i]);
-        }
-        
-        for (j=i + 1; j+3<N; j+=4) { //TODO: loop length may not be multiple of 4 (use masks)
-            
-            r2=_mm256_set1_pd(0);
-            for (k=0; k<3; k++) {
-                //r2 += (r[k][i]-r[k][j]) * (r[k][i]-r[k][j]);
-                dif = _mm256_sub_pd(ri[k], _mm256_loadu_pd(&r[k][j]));
-                r2 = _mm256_add_pd(r2, _mm256_mul_pd(dif, dif));
-            }
-            
-            //quotSq = sigma * sigma / r2;
-            quotSq = _mm256_div_pd(sigmaSq, r2);
-
-            //term2 = quotSq * quotSq * quotSq;
-            term2 = _mm256_mul_pd(quotSq, _mm256_mul_pd(quotSq, quotSq));
-
-            //term1 = term2 * term2;
-            term1 = _mm256_mul_pd(term2, term2);
-            
-            //Pot += (term1 - term2);
-            Pot = _mm256_add_pd(Pot, _mm256_sub_pd(term1, term2));
-        }
-
-        for (; j<N; j++) {
-            double _r2 = 0;
-            for (k=0; k<3; k++) {
-                _r2 += (r[k][i]-r[k][j]) * (r[k][i]-r[k][j]);
-            }
-            double _quotSq = sigma * sigma / _r2;
-            double _term2 = _quotSq * _quotSq * _quotSq;
-            double _term1 = _term2 * _term2;
-            Pot = _mm256_add_pd(Pot, _mm256_set_pd(_term1 - _term2, 0, 0, 0));
-        }
-    }
-    
-    double aux[4];
-    _mm256_storeu_pd(aux, Pot);
-
-    return 8*epsilon*(aux[0] + aux[1] + aux[2] + aux[3]);
-}
-
-
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom. 
-void computeAccelerations() {
+//   Returns the potential energy of the system
+double computeAccelerations() {
     int i, j, k;
-    __m256d one = _mm256_set1_pd(1), twentyFour = _mm256_set1_pd(24), fourtyEight = _mm256_set1_pd(48);
-    __m256d ri[3], f, rSqd, rSix, rEight, ai[3], aj;
+    __m256d one = _mm256_set1_pd(1), twentyFour = _mm256_set1_pd(24), fourtyEight = _mm256_set1_pd(48), sigma6 = _mm256_set1_pd(pow(sigma, 6));
+    __m256d ri[3], f, rSqd, rSix, rEight, ai[3], aj, term1, term2, Pot = _mm256_set1_pd(0);
     __m256d rij[3]; // position of i relative to j
     
     for (i = 0; i < N; i++) {  // set all accelerations to zero
@@ -567,6 +511,10 @@ void computeAccelerations() {
                 aj = _mm256_sub_pd(_mm256_loadu_pd(&a[k][j]), rij[k]);
                 _mm256_storeu_pd(&a[k][j], aj);
             }
+
+            term2 = _mm256_mul_pd(sigma6, rSix);
+            term1 = _mm256_mul_pd(term2, term2);
+            Pot = _mm256_add_pd(Pot, _mm256_sub_pd(term1, term2));
         }
 
         for (k=0; k<3; k++) {
@@ -589,12 +537,22 @@ void computeAccelerations() {
                 a[k][i] += _rij[k] * _f;
                 a[k][j] -= _rij[k] * _f;
             }
+
+            double _term2 = pow(sigma, 6) * _r6;
+            double _term1 = _term2 * _term2;
+            Pot = _mm256_add_pd(Pot, _mm256_set_pd(_term1 - _term2, 0, 0, 0));
         }
     }
+
+    double aux[4];
+    _mm256_storeu_pd(aux, Pot);
+
+    return 8*epsilon*(aux[0] + aux[1] + aux[2] + aux[3]);
 }
 
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
-double VelocityVerlet(double dt, int iter, FILE *fp) {
+// sets the value pointed to by potential to the current potential energy of the system
+double VelocityVerlet(double dt, int iter, FILE *fp, double* potential) {
     int i, k;
     
     double psum = 0.;
@@ -613,7 +571,7 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
         //printf("  %i  %6.4e   %6.4e   %6.4e\n",i,r[i][0],r[i][1],r[i][2]);
     }
     //  Update accellerations from updated positions
-    computeAccelerations();
+    *potential = computeAccelerations();
     //  Update velocity with updated acceleration
     for (i=0; i<N; i++) {
         for (k=0; k<3; k++) {
