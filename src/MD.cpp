@@ -27,6 +27,7 @@
 #include<stdlib.h>
 #include<math.h>
 #include<string.h>
+#include<immintrin.h>
 
 
 // Number of particles
@@ -50,13 +51,11 @@ double Tinit;  //2;
 //
 const int MAXPART=5001;
 //  Position
-double r[MAXPART][3];
+double r[3][MAXPART];
 //  Velocity
-double v[MAXPART][3];
+double v[3][MAXPART];
 //  Acceleration
-double a[MAXPART][3];
-//  Force
-double F[MAXPART][3];
+double a[3][MAXPART];
 
 // atom type
 char atype[10];
@@ -380,9 +379,9 @@ void initialize() {
             for (k=0; k<n; k++) {
                 if (p<N) {
                     
-                    r[p][0] = (i + 0.5)*pos;
-                    r[p][1] = (j + 0.5)*pos;
-                    r[p][2] = (k + 0.5)*pos;
+                    r[0][p] = (i + 0.5)*pos;
+                    r[1][p] = (j + 0.5)*pos;
+                    r[2][p] = (k + 0.5)*pos;
                 }
                 p++;
             }
@@ -420,9 +419,9 @@ double MeanSquaredVelocity() {
     
     for (int i=0; i<N; i++) {
         
-        vx2 = vx2 + v[i][0]*v[i][0];
-        vy2 = vy2 + v[i][1]*v[i][1];
-        vz2 = vz2 + v[i][2]*v[i][2];
+        vx2 = vx2 + v[0][i]*v[0][i];
+        vy2 = vy2 + v[1][i]*v[1][i];
+        vz2 = vz2 + v[2][i]*v[2][i];
         
     }
     v2 = (vx2+vy2+vz2)/N;
@@ -441,9 +440,9 @@ double Kinetic() { //Write Function here!
     for (int i=0; i<N; i++) {
         
         v2 = 0.;
-        for (int j=0; j<3; j++) {
+        for (int k=0; k<3; k++) {
             
-            v2 += v[i][j]*v[i][j];
+            v2 += v[k][i]*v[k][i];
             
         }
         kin += m*v2/2.;
@@ -458,34 +457,56 @@ double Kinetic() { //Write Function here!
 
 // Function to calculate the potential energy of the system
 double Potential() {
-    double quotSq, r2, term1, term2, Pot;
+    __m256d cons = _mm256_set1_pd(sigma * sigma * 0.5);
+    __m256d ri[3], dif, quotSq, r2, term1, term2, Pot;
     int i, j, k;
     
-    Pot=0.;
+    Pot=_mm256_set1_pd(0.);
     for (i=0; i<N; i++) {
-        for (j=i + 1; j<N; j++) {
-            
-            //if (j!=i) {
-                r2=0.;
-                for (k=0; k<3; k++) {
-                    r2 += (r[k][i]-r[k][j]) * (r[k][i]-r[k][j]);
-                }
-                //rnorm=sqrt(2 * r2);
-                //quot=sigma/rnorm;
-                quotSq = sigma * sigma / (2 * r2);
 
-                term2 = quotSq * quotSq * quotSq;
-                term1 = term2 * term2; //pow(quot, 12.);
-                
-                Pot += (term1 - term2);
-                
-            //}
+        for (k=0; k<3; k++) {
+            ri[k] = _mm256_set1_pd(r[k][i]);
+        }
+        
+        for (j=i + 1; j+3<N; j+=4) { //TODO: loop length may not be multiple of 4 (use masks)
+            
+            r2=_mm256_set1_pd(0);
+            for (k=0; k<3; k++) {
+                //r2 += (r[k][i]-r[k][j]) * (r[k][i]-r[k][j]);
+                dif = _mm256_sub_pd(ri[k], _mm256_loadu_pd(&r[k][j]));
+                r2 = _mm256_add_pd(r2, _mm256_mul_pd(dif, dif));
+            }
+            
+            //quotSq = sigma * sigma * 0.5 / r2;
+            quotSq = _mm256_div_pd(cons, r2);
+
+            //term2 = quotSq * quotSq * quotSq;
+            term2 = _mm256_mul_pd(quotSq, _mm256_mul_pd(quotSq, quotSq));
+
+            //term1 = term2 * term2;
+            term1 = _mm256_mul_pd(term2, term2);
+            
+            //Pot += (term1 - term2);
+            Pot = _mm256_add_pd(Pot, _mm256_sub_pd(term1, term2));
+        }
+
+        for (; j<N; j++) {
+            double _r2 = 0;
+            for (k=0; k<3; k++) {
+                _r2 += (r[k][i]-r[k][j]) * (r[k][i]-r[k][j]);
+            }
+            double _quotSq = sigma * sigma * 0.5 / _r2;
+            double _term2 = _quotSq * _quotSq * _quotSq;
+            double _term1 = _term2 * _term2;
+            Pot = _mm256_add_pd(Pot, _mm256_set_pd(_term1 - _term2, 0, 0, 0));
         }
     }
     
-    return 4*epsilon*Pot;
-}
+    double aux[4];
+    _mm256_storeu_pd(aux, Pot);
 
+    return 4*epsilon*(aux[0] + aux[1] + aux[2] + aux[3]);
+}
 
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
@@ -493,37 +514,80 @@ double Potential() {
 //   accelleration of each atom. 
 void computeAccelerations() {
     int i, j, k;
-    double f, rSqd;
-    double rij[3]; // position of i relative to j
-    
+    __m256d one = _mm256_set1_pd(1), twentyFour = _mm256_set1_pd(24), fourtyEight = _mm256_set1_pd(48);
+    __m256d ri[3], f, rSqd, rSix, rEight, ai[3], aj;
+    __m256d rij[3]; // position of i relative to j
     
     for (i = 0; i < N; i++) {  // set all accelerations to zero
         for (k = 0; k < 3; k++) {
-            a[i][k] = 0;
+            a[k][i] = 0;
         }
     }
-    for (i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        for (j = i+1; j < N; j++) {
+
+    for (i = 0; i < N; i++) {   // loop over all distinct pairs i,j
+        for (k=0; k<3; k++) {
+            ri[k] = _mm256_set1_pd(r[k][i]);
+            ai[k] = _mm256_set1_pd(0);
+        }
+        
+        for (j = i+1; j+3 < N; j+=4) {
+            rSqd = _mm256_set1_pd(0);
 
             for (k = 0; k < 3; k++) {
                 //  component-by-componenent position of i relative to j
-                rij[k] = r[i][k] - r[j][k];
+                //rij[k] = r[k][i] - r[k][j];
+                rij[k] = _mm256_sub_pd(ri[k], _mm256_loadu_pd(&r[k][j]));
+                
                 //  sum of squares of the components
                 //rSqd += rij[k] * rij[k];
+                rSqd = _mm256_add_pd(rSqd, _mm256_mul_pd(rij[k], rij[k]));
             }
 
-            rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
+            //rSqd = 1 / (rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2]);
+            rSqd = _mm256_div_pd(one, rSqd); //r^-2
 
-            double rSev = rSqd * rSqd * rSqd;
-            double rEigh = rSev * rSqd;
+            //rSix = rSqd * rSqd * rSqd; //r^-6
+            rSix = _mm256_mul_pd(rSqd, _mm256_mul_pd(rSqd, rSqd));
+
+            //rEight = rSix * rSqd; //r^-8
+            rEight = _mm256_mul_pd(rSix, rSqd);
             
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            f = 24 * (2 * (1 / (rEigh * rSev)) - (1 / rEigh));
+            //f = (48 * rSix * rEight) - (24 * rEight);
+            f = _mm256_sub_pd(_mm256_mul_pd(_mm256_mul_pd(fourtyEight, rSix), rEight), _mm256_mul_pd(twentyFour, rEight));
 
             for (k = 0; k < 3; k++) {
                 //  from F = ma, where m = 1 in natural units!
-                a[i][k] += rij[k] * f;
-                a[j][k] -= rij[k] * f;
+                rij[k] = _mm256_mul_pd(rij[k], f);
+
+                //a[k][i] += rij[k] * f;
+                ai[k] = _mm256_add_pd(ai[k], rij[k]);
+
+                //a[k][j] -= rij[k] * f;
+                aj = _mm256_sub_pd(_mm256_loadu_pd(&a[k][j]), rij[k]);
+                _mm256_storeu_pd(&a[k][j], aj);
+            }
+        }
+
+        for (k=0; k<3; k++) {
+            double aux[5]; //4 should be enough, but a seg fault was happening in the store for some reason
+            _mm256_storeu_pd(aux, ai[k]);
+            a[k][i] += aux[0] + aux[1] + aux[2] + aux[3];
+        }
+
+        for (; j<N; j++) {
+            double _rij[3], _r2 = 0;
+            for (k=0; k<3; k++) {
+                _rij[k] = r[k][i] - r[k][j];
+                _r2 += _rij[k] * _rij[k];
+            }
+            _r2 = 1 / _r2;
+            double _r6 = _r2 * _r2 * _r2;
+            double _r8 = _r6 * _r2;
+            double _f = (48 * _r6 * _r8) - (24 * _r8);
+            for (k=0; k<3; k++) {
+                a[k][i] += _rij[k] * _f;
+                a[k][j] -= _rij[k] * _f;
             }
         }
     }
@@ -531,7 +595,7 @@ void computeAccelerations() {
 
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
 double VelocityVerlet(double dt, int iter, FILE *fp) {
-    int i, j, k;
+    int i, k;
     
     double psum = 0.;
     
@@ -541,10 +605,10 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     //  Update positions and velocity with current velocity and acceleration
     //printf("  Updated Positions!\n");
     for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            r[i][j] += v[i][j]*dt + 0.5*a[i][j]*dt*dt;
+        for (k=0; k<3; k++) {
+            r[k][i] += v[k][i]*dt + 0.5*a[k][i]*dt*dt;
             
-            v[i][j] += 0.5*a[i][j]*dt;
+            v[k][i] += 0.5*a[k][i]*dt;
         }
         //printf("  %i  %6.4e   %6.4e   %6.4e\n",i,r[i][0],r[i][1],r[i][2]);
     }
@@ -552,21 +616,21 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     computeAccelerations();
     //  Update velocity with updated acceleration
     for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            v[i][j] += 0.5*a[i][j]*dt;
+        for (k=0; k<3; k++) {
+            v[k][i] += 0.5*a[k][i]*dt;
         }
     }
     
     // Elastic walls
     for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            if (r[i][j]<0.) {
-                v[i][j] *=-1.; //- elastic walls
-                psum += 2*m*fabs(v[i][j])/dt;  // contribution to pressure from "left" walls
+        for (k=0; k<3; k++) {
+            if (r[k][i]<0.) {
+                v[k][i] *=-1.; //- elastic walls
+                psum += 2*m*fabs(v[k][i])/dt;  // contribution to pressure from "left" walls
             }
-            if (r[i][j]>=L) {
-                v[i][j]*=-1.;  //- elastic walls
-                psum += 2*m*fabs(v[i][j])/dt;  // contribution to pressure from "right" walls
+            if (r[k][i]>=L) {
+                v[k][i]*=-1.;  //- elastic walls
+                psum += 2*m*fabs(v[k][i])/dt;  // contribution to pressure from "right" walls
             }
         }
     }
@@ -588,13 +652,13 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
 
 void initializeVelocities() {
     
-    int i, j;
+    int i, k;
     
     for (i=0; i<N; i++) {
         
-        for (j=0; j<3; j++) {
+        for (k=0; k<3; k++) {
             //  Pull a number from a Gaussian Distribution
-            v[i][j] = gaussdist();
+            v[k][i] = gaussdist();
             
         }
     }
@@ -604,9 +668,9 @@ void initializeVelocities() {
     double vCM[3] = {0, 0, 0};
     
     for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
+        for (k=0; k<3; k++) {
             
-            vCM[j] += m*v[i][j];
+            vCM[k] += m*v[k][i];
             
         }
     }
@@ -619,10 +683,10 @@ void initializeVelocities() {
     //  center of mass velocity to zero so that the system does
     //  not drift in space!
     for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            
-            v[i][j] -= vCM[j];
-            
+        for (k=0; k<3; k++) {
+
+            v[k][i] -= vCM[k];
+
         }
     }
     
@@ -631,9 +695,9 @@ void initializeVelocities() {
     double vSqdSum, lambda;
     vSqdSum=0.;
     for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
+        for (k=0; k<3; k++) {
             
-            vSqdSum += v[i][j]*v[i][j];
+            vSqdSum += v[k][i]*v[k][i];
             
         }
     }
@@ -641,9 +705,9 @@ void initializeVelocities() {
     lambda = sqrt( 3*(N-1)*Tinit/vSqdSum);
     
     for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
+        for (k=0; k<3; k++) {
             
-            v[i][j] *= lambda;
+            v[k][i] *= lambda;
             
         }
     }
