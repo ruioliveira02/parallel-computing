@@ -457,7 +457,7 @@ double Kinetic() { //Write Function here!
 
 // Function to calculate the potential energy of the system
 double Potential() {
-    __m256d cons = _mm256_set1_pd(sigma * sigma * 0.5);
+    __m256d sigmaSq = _mm256_set1_pd(sigma * sigma);
     __m256d ri[3], dif, quotSq, r2, term1, term2, Pot;
     int i, j, k;
     
@@ -477,8 +477,8 @@ double Potential() {
                 r2 = _mm256_add_pd(r2, _mm256_mul_pd(dif, dif));
             }
             
-            //quotSq = sigma * sigma * 0.5 / r2;
-            quotSq = _mm256_div_pd(cons, r2);
+            //quotSq = sigma * sigma / r2;
+            quotSq = _mm256_div_pd(sigmaSq, r2);
 
             //term2 = quotSq * quotSq * quotSq;
             term2 = _mm256_mul_pd(quotSq, _mm256_mul_pd(quotSq, quotSq));
@@ -495,7 +495,7 @@ double Potential() {
             for (k=0; k<3; k++) {
                 _r2 += (r[k][i]-r[k][j]) * (r[k][i]-r[k][j]);
             }
-            double _quotSq = sigma * sigma * 0.5 / _r2;
+            double _quotSq = sigma * sigma / _r2;
             double _term2 = _quotSq * _quotSq * _quotSq;
             double _term1 = _term2 * _term2;
             Pot = _mm256_add_pd(Pot, _mm256_set_pd(_term1 - _term2, 0, 0, 0));
@@ -505,7 +505,7 @@ double Potential() {
     double aux[4];
     _mm256_storeu_pd(aux, Pot);
 
-    return 4*epsilon*(aux[0] + aux[1] + aux[2] + aux[3]);
+    return 8*epsilon*(aux[0] + aux[1] + aux[2] + aux[3]);
 }
 
 
