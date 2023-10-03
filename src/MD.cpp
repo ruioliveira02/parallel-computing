@@ -49,13 +49,13 @@ double L;
 double Tinit;  //2;
 //  Vectors!
 //
-const int MAXPART=5001;
+const int MAXPART=5000;
 //  Position
-double r[3][MAXPART];
+__attribute__((aligned(32))) double r[3][MAXPART];
 //  Velocity
-double v[3][MAXPART];
+__attribute__((aligned(32))) double v[3][MAXPART];
 //  Acceleration
-double a[3][MAXPART];
+__attribute__((aligned(32))) double a[3][MAXPART];
 
 // atom type
 char atype[10];
@@ -473,14 +473,34 @@ double computeAccelerations() {
             ri[k] = _mm256_set1_pd(r[k][i]);
             ai[k] = _mm256_set1_pd(0);
         }
+
+        for (j=i+1; j%4 != 0; j++) {
+            double _rij[3], _r2 = 0;
+            for (k=0; k<3; k++) {
+                _rij[k] = r[k][i] - r[k][j];
+                _r2 += _rij[k] * _rij[k];
+            }
+            _r2 = 1 / _r2;
+            double _r6 = _r2 * _r2 * _r2;
+            double _r8 = _r6 * _r2;
+            double _f = (48 * _r6 * _r8) - (24 * _r8);
+            for (k=0; k<3; k++) {
+                a[k][i] += _rij[k] * _f;
+                a[k][j] -= _rij[k] * _f;
+            }
+
+            double _term2 = pow(sigma, 6) * _r6;
+            double _term1 = _term2 * _term2;
+            Pot = _mm256_add_pd(Pot, _mm256_set_pd(_term1 - _term2, 0, 0, 0));
+        }
         
-        for (j = i+1; j+3 < N; j+=4) {
+        for (; j < N; j+=4) {
             rSqd = _mm256_set1_pd(0);
 
             for (k = 0; k < 3; k++) {
                 //  component-by-componenent position of i relative to j
                 //rij[k] = r[k][i] - r[k][j];
-                rij[k] = _mm256_sub_pd(ri[k], _mm256_loadu_pd(&r[k][j]));
+                rij[k] = _mm256_sub_pd(ri[k], _mm256_load_pd(&r[k][j]));
                 
                 //  sum of squares of the components
                 //rSqd += rij[k] * rij[k];
@@ -508,8 +528,8 @@ double computeAccelerations() {
                 ai[k] = _mm256_add_pd(ai[k], rij[k]);
 
                 //a[k][j] -= rij[k] * f;
-                aj = _mm256_sub_pd(_mm256_loadu_pd(&a[k][j]), rij[k]);
-                _mm256_storeu_pd(&a[k][j], aj);
+                aj = _mm256_sub_pd(_mm256_load_pd(&a[k][j]), rij[k]); //TODO: error with aligned load
+                _mm256_store_pd(&a[k][j], aj);
             }
 
             term2 = _mm256_mul_pd(sigma6, rSix);
@@ -521,26 +541,6 @@ double computeAccelerations() {
             double aux[5]; //4 should be enough, but a seg fault was happening in the store for some reason
             _mm256_storeu_pd(aux, ai[k]);
             a[k][i] += aux[0] + aux[1] + aux[2] + aux[3];
-        }
-
-        for (; j<N; j++) {
-            double _rij[3], _r2 = 0;
-            for (k=0; k<3; k++) {
-                _rij[k] = r[k][i] - r[k][j];
-                _r2 += _rij[k] * _rij[k];
-            }
-            _r2 = 1 / _r2;
-            double _r6 = _r2 * _r2 * _r2;
-            double _r8 = _r6 * _r2;
-            double _f = (48 * _r6 * _r8) - (24 * _r8);
-            for (k=0; k<3; k++) {
-                a[k][i] += _rij[k] * _f;
-                a[k][j] -= _rij[k] * _f;
-            }
-
-            double _term2 = pow(sigma, 6) * _r6;
-            double _term1 = _term2 * _term2;
-            Pot = _mm256_add_pd(Pot, _mm256_set_pd(_term1 - _term2, 0, 0, 0));
         }
     }
 

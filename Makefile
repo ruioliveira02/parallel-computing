@@ -7,11 +7,11 @@ CFLAGS = -O3 -pg -mavx# none
 MD.exe: $(SRC)/MD.cpp
 	$(CC) $(CFLAGS) $(SRC)MD.cpp -lm -o MD.exe
 
-assembly:
+assembly: $(SRC)/MD.cpp
 	$(CC) $(CFLAGS) -S $(SRC)MD.cpp -lm -o assembly
 
 clean:
-	rm ./MD.exe
+	rm -f ./MD.exe assembly
 
 run: MD.exe
 	./MD.exe < inputdata.txt
