@@ -458,7 +458,8 @@ double Kinetic() { //Write Function here!
 //   Returns the potential energy of the system
 double computeAccelerations() {
     int i, j, k;
-    __m256d one = _mm256_set1_pd(1), twentyFour = _mm256_set1_pd(24), fourtyEight = _mm256_set1_pd(48), sigma6 = _mm256_set1_pd(pow(sigma, 6));
+    double _sigma6 = pow(sigma, 6);
+    __m256d one = _mm256_set1_pd(1), twentyFour = _mm256_set1_pd(24), fourtyEight = _mm256_set1_pd(48), sigma6 = _mm256_set1_pd(_sigma6);
     __m256d ri[3], f, rSqd, rSix, rEight, ai[3], aj, term1, term2, Pot = _mm256_set1_pd(0);
     __m256d rij[3]; // position of i relative to j
     
@@ -489,7 +490,7 @@ double computeAccelerations() {
                 a[k][j] -= _rij[k] * _f;
             }
 
-            double _term2 = pow(sigma, 6) * _r6;
+            double _term2 = _sigma6 * _r6;
             double _term1 = _term2 * _term2;
             Pot = _mm256_add_pd(Pot, _mm256_set_pd(_term1 - _term2, 0, 0, 0));
         }
@@ -528,7 +529,7 @@ double computeAccelerations() {
                 ai[k] = _mm256_add_pd(ai[k], rij[k]);
 
                 //a[k][j] -= rij[k] * f;
-                aj = _mm256_sub_pd(_mm256_load_pd(&a[k][j]), rij[k]); //TODO: error with aligned load
+                aj = _mm256_sub_pd(_mm256_load_pd(&a[k][j]), rij[k]);
                 _mm256_store_pd(&a[k][j], aj);
             }
 
