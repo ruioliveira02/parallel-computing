@@ -29,6 +29,19 @@
 #include<string.h>
 #include<immintrin.h>
 
+typedef __m256d vector;
+#define set1(a) _mm256_set1_pd(a)
+#define add(a,b) _mm256_add_pd(a,b)
+#define sub(a,b) _mm256_sub_pd(a,b)
+#define mul(a,b) _mm256_mul_pd(a,b)
+#define mul3(a,b,c) _mm256_mul_pd(mul(a,b),c)
+#define div(a,b) _mm256_div_pd(a,b)
+#define load(a) _mm256_load_pd(&a)
+#define store(a,b) _mm256_store_pd(a,b)
+#define storeu(a,b) _mm256_storeu_pd(a,b)
+#define sum(a) (a[0] + a[1] + a[2] + a[3])
+
+#define VEC_SIZE (sizeof(vector) / sizeof(r[0][0]))
 
 // Number of particles
 int N;
@@ -459,9 +472,10 @@ double Kinetic() { //Write Function here!
 double computeAccelerations() {
     int i, j, k;
     double _sigma6 = pow(sigma, 6);
-    __m256d one = _mm256_set1_pd(1), twentyFour = _mm256_set1_pd(24), fourtyEight = _mm256_set1_pd(48), sigma6 = _mm256_set1_pd(_sigma6);
-    __m256d ri[3], f, rSqd, rSix, rEight, ai[3], aj, term1, term2, Pot = _mm256_set1_pd(0);
-    __m256d rij[3]; // position of i relative to j
+    double _Pot = 0;
+    vector one = set1(1), twentyFour = set1(24), fourtyEight = set1(48), sigma6 = set1(_sigma6);
+    vector ri[3], f, rSqd, rSix, rEight, ai[3], aj, term1, term2, Pot = set1(0);
+    vector rij[3]; // position of i relative to j
     
     for (i = 0; i < N; i++) {  // set all accelerations to zero
         for (k = 0; k < 3; k++) {
@@ -471,11 +485,11 @@ double computeAccelerations() {
 
     for (i = 0; i < N; i++) {   // loop over all distinct pairs i,j
         for (k=0; k<3; k++) {
-            ri[k] = _mm256_set1_pd(r[k][i]);
-            ai[k] = _mm256_set1_pd(0);
+            ri[k] = set1(r[k][i]);
+            ai[k] = set1(0);
         }
-
-        for (j=i+1; j%4 != 0; j++) {
+        
+        for (j=i+1; j%VEC_SIZE != 0; j++) {
             double _rij[3], _r2 = 0;
             for (k=0; k<3; k++) {
                 _rij[k] = r[k][i] - r[k][j];
@@ -492,63 +506,63 @@ double computeAccelerations() {
 
             double _term2 = _sigma6 * _r6;
             double _term1 = _term2 * _term2;
-            Pot = _mm256_add_pd(Pot, _mm256_set_pd(_term1 - _term2, 0, 0, 0));
+            _Pot +=_term1 - _term2;
         }
         
-        for (; j < N; j+=4) {
-            rSqd = _mm256_set1_pd(0);
+        for (; j < N; j += VEC_SIZE) {
+            rSqd = set1(0);
 
             for (k = 0; k < 3; k++) {
                 //  component-by-componenent position of i relative to j
                 //rij[k] = r[k][i] - r[k][j];
-                rij[k] = _mm256_sub_pd(ri[k], _mm256_load_pd(&r[k][j]));
+                rij[k] = sub(ri[k], load(r[k][j]));
                 
                 //  sum of squares of the components
                 //rSqd += rij[k] * rij[k];
-                rSqd = _mm256_add_pd(rSqd, _mm256_mul_pd(rij[k], rij[k]));
+                rSqd = add(rSqd, mul(rij[k], rij[k]));
             }
 
             //rSqd = 1 / (rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2]);
-            rSqd = _mm256_div_pd(one, rSqd); //r^-2
+            rSqd = div(one, rSqd); //r^-2
 
             //rSix = rSqd * rSqd * rSqd; //r^-6
-            rSix = _mm256_mul_pd(rSqd, _mm256_mul_pd(rSqd, rSqd));
+            rSix = mul3(rSqd, rSqd, rSqd);
 
             //rEight = rSix * rSqd; //r^-8
-            rEight = _mm256_mul_pd(rSix, rSqd);
+            rEight = mul(rSix, rSqd);
             
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
             //f = (48 * rSix * rEight) - (24 * rEight);
-            f = _mm256_sub_pd(_mm256_mul_pd(_mm256_mul_pd(fourtyEight, rSix), rEight), _mm256_mul_pd(twentyFour, rEight));
+            f = sub(mul3(fourtyEight, rSix, rEight), mul(twentyFour, rEight));
 
             for (k = 0; k < 3; k++) {
                 //  from F = ma, where m = 1 in natural units!
-                rij[k] = _mm256_mul_pd(rij[k], f);
+                rij[k] = mul(rij[k], f);
 
                 //a[k][i] += rij[k] * f;
-                ai[k] = _mm256_add_pd(ai[k], rij[k]);
+                ai[k] = add(ai[k], rij[k]);
 
                 //a[k][j] -= rij[k] * f;
-                aj = _mm256_sub_pd(_mm256_load_pd(&a[k][j]), rij[k]);
-                _mm256_store_pd(&a[k][j], aj);
+                aj = sub(load(a[k][j]), rij[k]);
+                store(&a[k][j], aj);
             }
 
-            term2 = _mm256_mul_pd(sigma6, rSix);
-            term1 = _mm256_mul_pd(term2, term2);
-            Pot = _mm256_add_pd(Pot, _mm256_sub_pd(term1, term2));
+            term2 = mul(sigma6, rSix);
+            term1 = mul(term2, term2);
+            Pot = add(Pot, sub(term1, term2));
         }
 
         for (k=0; k<3; k++) {
-            double aux[5]; //4 should be enough, but a seg fault was happening in the store for some reason
-            _mm256_storeu_pd(aux, ai[k]);
-            a[k][i] += aux[0] + aux[1] + aux[2] + aux[3];
+            double aux[VEC_SIZE]; //4 should be enough, but a seg fault was happening in the store for some reason
+            storeu(aux, ai[k]);
+            a[k][i] += sum(aux);
         }
     }
 
-    double aux[4];
-    _mm256_storeu_pd(aux, Pot);
+    double aux[VEC_SIZE];
+    storeu(aux, Pot);
 
-    return 8*epsilon*(aux[0] + aux[1] + aux[2] + aux[3]);
+    return 8*epsilon*(sum(aux) + _Pot);
 }
 
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
