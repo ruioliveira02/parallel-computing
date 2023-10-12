@@ -404,9 +404,6 @@ void initialize() {
      printf("  %6.3e  %6.3e  %6.3e\n",v[i][0],v[i][1],v[i][2]);
      }
      */
-    
-    
-    
 }   
 
 
@@ -463,26 +460,23 @@ double Potential() {
     
     Pot=0.;
     for (i=0; i<N; i++) {
-        for (j=0; j<N; j++) {
-            
-            if (j!=i) {
-                r2=0.;
-                for (k=0; k<3; k++) {
-                    r2 += (r[i][k]-r[j][k])*(r[i][k]-r[j][k]);
-                }
-                rnorm=sqrt(r2);
-                quot=sigma/rnorm;
-
-                double quot3 = quot * quot * quot;
-                term2 = quot3 * quot3;
-                term1 = term2 * term2;
-
-                Pot += 4*epsilon*(term1 - term2);         
+        for (j=i + 1; j<N; j++) {
+            r2=0.;
+            for (k=0; k<3; k++) {
+                r2 += (r[i][k]-r[j][k])*(r[i][k]-r[j][k]);
             }
+            rnorm=sqrt(r2);
+            quot=sigma/rnorm;
+
+            double quot3 = quot * quot * quot;
+            term2 = quot3 * quot3;
+            term1 = term2 * term2;
+
+            Pot += (term1 - term2);         
         }
     }
     
-    return Pot;
+    return 8 * epsilon * Pot;
 }
 
 
