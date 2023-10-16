@@ -509,10 +509,10 @@ void computeAccelerations() {
             
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
             double rSqd2 = rSqd * rSqd;
-            double rSqd4 = rSqd2 * rSqd2;
-            double rSqd7 = rSqd4 * rSqd2 * rSqd;
+            double rSqd3 = rSqd2 * rSqd;
+            double rSqd7 = rSqd2 * rSqd2 * rSqd3;
 
-            f = 24 * (2 * (1.0 / rSqd7) - (1 / rSqd4));
+            f = 24 * (2 - rSqd3) / rSqd7;
             for (k = 0; k < 3; k++) {
                 //  from F = ma, where m = 1 in natural units!
                 a[i][k] += rij[k] * f;
