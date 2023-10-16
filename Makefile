@@ -1,6 +1,6 @@
 CC = gcc
 SRC = src/
-CFLAGS = -O3 -pg# none
+CFLAGS = -O3 -pg -mavx# none
 
 .DEFAULT_GOAL = MD.exe
 
