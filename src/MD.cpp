@@ -41,6 +41,20 @@ typedef __m256d vector;
 #define storeu(a,b) _mm256_storeu_pd(a,b)
 #define sum(a) (a[0] + a[1] + a[2] + a[3])
 
+/*
+typedef double vector;
+#define set1(a) (a)
+#define add(a,b) (a+b)
+#define sub(a,b) (a-b)
+#define mul(a,b) (a*b)
+#define mul3(a,b,c) (a*b*c)
+#define div(a,b) (a/b)
+#define load(a) (a)
+#define store(a,b) *a=b
+#define storeu(a,b) *a=b
+#define sum(a) (a[0])
+*/
+
 #define VEC_SIZE (sizeof(vector) / sizeof(r[0][0]))
 
 // Number of particles
