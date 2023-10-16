@@ -63,19 +63,18 @@ char atype[10];
 //  Function prototypes
 //  initialize positions on simple cubic lattice, also calls function to initialize velocities
 void initialize();  
-//  update positions and velocities using Velocity Verlet algorithm 
+//  update positions, velocities and potential using Velocity Verlet algorithm 
 //  print particle coordinates to file for rendering via VMD or other animation software
 //  return 'instantaneous pressure'
-double VelocityVerlet(double dt, int iter, FILE *fp);  
+double VelocityVerlet(double dt, int iter, FILE *fp, double* potential);  
 //  Compute Force using F = -dV/dr
 //  solve F = ma for use in Velocity Verlet
-void computeAccelerations();
+double computeAccelerationsAndPotential();
 //  Numerical Recipes function for generation gaussian distribution
 double gaussdist();
 //  Initialize velocities according to user-supplied initial Temperature (Tinit)
 void initializeVelocities();
-//  Compute total potential energy from particle coordinates
-double Potential();
+
 //  Compute mean squared velocity from particle velocities
 double MeanSquaredVelocity();
 //  Compute total kinetic energy from particle mass and velocities
@@ -267,7 +266,7 @@ int main()
     //  Based on their positions, calculate the ininial intermolecular forces
     //  The accellerations of each particle will be defined from the forces and their
     //  mass, and this will allow us to update their positions via Newton's law
-    computeAccelerations();
+    PE = computeAccelerationsAndPotential();
     
     
     // Print number of particles to the trajectory file
@@ -301,7 +300,7 @@ int main()
         // This updates the positions and velocities using Newton's Laws
         // Also computes the Pressure as the sum of momentum changes from wall collisions / timestep
         // which is a Kinetic Theory of gasses concept of Pressure
-        Press = VelocityVerlet(dt, i+1, tfp);
+        Press = VelocityVerlet(dt, i+1, tfp, &PE);
         Press *= PressFac;
         
         //  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -311,7 +310,6 @@ int main()
         //  We would also like to use the IGL to try to see if we can extract the gas constant
         mvs = MeanSquaredVelocity();
         KE = Kinetic();
-        PE = Potential();
         
         // Temperature from Kinetic Theory
         Temp = m*mvs/(3*kB) * TempFac;
@@ -452,41 +450,13 @@ double Kinetic() { //Write Function here!
     
 }
 
-
-// Function to calculate the potential energy of the system
-double Potential() {
-    double quot, r2, rnorm, term1, term2, Pot;
-    int i, j, k;
-    
-    Pot=0.;
-    for (i=0; i<N; i++) {
-        for (j=i + 1; j<N; j++) {
-            r2=0.;
-            for (k=0; k<3; k++) {
-                r2 += (r[i][k]-r[j][k])*(r[i][k]-r[j][k]);
-            }
-            rnorm=sqrt(r2);
-            quot=sigma/rnorm;
-
-            double quot3 = quot * quot * quot;
-            term2 = quot3 * quot3;
-            term1 = term2 * term2;
-
-            Pot += (term1 - term2);         
-        }
-    }
-    
-    return 8 * epsilon * Pot;
-}
-
-
-
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom. 
-void computeAccelerations() {
+//   Returns its potential energy
+double computeAccelerationsAndPotential() {
     int i, j, k;
-    double f, rSqd;
+    double f, rSqd, quot, rnorm, term1, term2, Pot;;
     double rij[3]; // position of i relative to j
     
     
@@ -507,6 +477,15 @@ void computeAccelerations() {
                 rSqd += rij[k] * rij[k];
             }
             
+            rnorm=sqrt(rSqd);
+            quot=sigma/rnorm;
+
+            double quot3 = quot * quot * quot;
+            term2 = quot3 * quot3;
+            term1 = term2 * term2;
+
+            Pot += (term1 - term2);
+
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
             double rSqd2 = rSqd * rSqd;
             double rSqd3 = rSqd2 * rSqd;
@@ -520,10 +499,11 @@ void computeAccelerations() {
             }
         }
     }
+    return 8 * epsilon * Pot;
 }
 
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
-double VelocityVerlet(double dt, int iter, FILE *fp) {
+double VelocityVerlet(double dt, int iter, FILE *fp, double* potential) {
     int i, j, k;
     
     double psum = 0.;
@@ -541,8 +521,8 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
         }
         //printf("  %i  %6.4e   %6.4e   %6.4e\n",i,r[i][0],r[i][1],r[i][2]);
     }
-    //  Update accellerations from updated positions
-    computeAccelerations();
+    //  Update accellerations from updated positions and get the potential energy
+    *potential = computeAccelerationsAndPotential();
     //  Update velocity with updated acceleration
     for (i=0; i<N; i++) {
         for (j=0; j<3; j++) {
