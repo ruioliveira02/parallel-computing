@@ -32,6 +32,7 @@
 typedef __m256d vector;
 #define set1(a) _mm256_set1_pd(a)
 #define add(a,b) _mm256_add_pd(a,b)
+#define add3(a,b,c) _mm256_add_pd(add(a,b),c)
 #define sub(a,b) _mm256_sub_pd(a,b)
 #define mul(a,b) _mm256_mul_pd(a,b)
 #define mul3(a,b,c) _mm256_mul_pd(mul(a,b),c)
@@ -488,7 +489,7 @@ double computeAccelerations() {
     double _sigma6 = pow(sigma, 6);
     double _Pot = 0;
     vector one = set1(1), twentyFour = set1(24), fourtyEight = set1(48), sigma6 = set1(_sigma6);
-    vector ri[3], f, rSqd, rSix, rEight, ai[3], aj, term1, term2, Pot = set1(0);
+    vector ri[3], f, rSqd, rFour, rSix, rEight, ai[3], aj, term1, term2, Pot = set1(0);
     vector rij[3]; // position of i relative to j
     
     for (i = 0; i < N; i++) {  // set all accelerations to zero
@@ -524,26 +525,24 @@ double computeAccelerations() {
         }
         
         for (; j < N; j += VEC_SIZE) {
-            rSqd = set1(0);
+            //  component-by-componenent position of i relative to j
+            //rij[k] = r[k][i] - r[k][j];
+            rij[0] = sub(ri[0], load(r[0][j]));
+            rij[1] = sub(ri[1], load(r[1][j]));
+            rij[2] = sub(ri[2], load(r[2][j]));
 
-            for (k = 0; k < 3; k++) {
-                //  component-by-componenent position of i relative to j
-                //rij[k] = r[k][i] - r[k][j];
-                rij[k] = sub(ri[k], load(r[k][j]));
-                
-                //  sum of squares of the components
-                //rSqd += rij[k] * rij[k];
-                rSqd = add(rSqd, mul(rij[k], rij[k]));
-            }
+            //  sum of squares of the components
+            //rSqd += rij[k] * rij[k];
+            rSqd = add3(mul(rij[0], rij[0]), mul(rij[1], rij[1]), mul(rij[2], rij[2]));
 
             //rSqd = 1 / (rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2]);
             rSqd = div(one, rSqd); //r^-2
 
-            //rSix = rSqd * rSqd * rSqd; //r^-6
-            rSix = mul3(rSqd, rSqd, rSqd);
+            rFour = mul(rSqd, rSqd); //r^-4
 
-            //rEight = rSix * rSqd; //r^-8
-            rEight = mul(rSix, rSqd);
+            rSix = mul3(rSqd, rSqd, rSqd); //r^-6
+
+            rEight = mul(rFour, rFour); //r^-8
             
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
             //f = (48 * rSix * rEight) - (24 * rEight);
