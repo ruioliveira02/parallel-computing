@@ -1,3 +1,7 @@
 MD.exe
-*.out.*
+checker
+callgrind.out.*
 *.txt
+gmon.out
+bin/
+.vscode/

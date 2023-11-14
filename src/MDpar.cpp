@@ -78,7 +78,7 @@ double L;
 double Tinit;  //2;
 //  Vectors!
 //
-const int MAXPART=5000;
+const int MAXPART=5004;
 //  Position
 __attribute__((aligned(32))) double r[3][MAXPART];
 //  Velocity
@@ -237,7 +237,7 @@ int main()
     
     scanf("%lf",&rho);
     
-    N = 10*216;
+    N = 5000;
     Vol = N/(rho*NA);
     
     Vol /= VolFac;
@@ -528,7 +528,7 @@ double computeAccelerations() {
                 double _r8 = _r6 * _r2;
                 double _f = (48 * _r6 * _r8) - (24 * _r8);
                 for (k=0; k<3; k++) {
-                    a[k][i] += _rij[k] * _f;
+                    temp[k][i] += _rij[k] * _f;
                     temp[k][j] -= _rij[k] * _f;
                 }
 
@@ -581,7 +581,7 @@ double computeAccelerations() {
             for (k=0; k<3; k++) {
                 double aux[VEC_SIZE];
                 storeu(aux, ai[k]);
-                a[k][i] += sum(aux);
+                temp[k][i] += sum(aux);
             }
         }
 
