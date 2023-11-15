@@ -3,7 +3,7 @@
 METRICS=instructions,cycles,L1-dcache-load-misses
 REPS=3
 
-for i in {1..5}
+for i in {1..40}
 do
     export OMP_NUM_THREADS=$i
     echo Threads: $i

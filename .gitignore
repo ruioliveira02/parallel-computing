@@ -2,6 +2,7 @@ MD.exe
 checker
 callgrind.out.*
 *.txt
+*.xyz
 gmon.out
 bin/
 .vscode/

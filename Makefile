@@ -1,27 +1,30 @@
 CC = gcc
 SRC = src/
 BIN = bin/
-CFLAGS = -O3 -pg -mavx -fopenmp# none
+CFLAGS = -O3 -Wno-unused-result -pg -mavx -fopenmp# none
 
 .DEFAULT_GOAL = all
 
 all: $(BIN)MDseq.exe $(BIN)MDpar.exe
 
 
+$(BIN)MDold.exe: $(SRC)MDold.cpp
+	$(CC) $(CFLAGS) $< -lm -o $@
+
 $(BIN)MDseq.exe: $(SRC)MDseq.cpp
-	$(CC) $(CFLAGS) $(SRC)MDseq.cpp -lm -o $@
+	$(CC) $(CFLAGS) $< -lm -o $@
 
 $(BIN)MDpar.exe: $(SRC)MDpar.cpp
-	$(CC) $(CFLAGS) $(SRC)MDpar.cpp -lm -fopenmp -o $@
+	$(CC) $(CFLAGS) $< -lm -fopenmp -o $@
 
 $(BIN)checker: $(SRC)checker.cpp
-	g++ $(SRC)checker.cpp -o $@
+	g++ $< -o $@
 
 clean:
-	rm -f $(BIN)MD*.exe checker
+	rm -f $(BIN)*
 
 run: $(BIN)MDpar.exe
-	$(BIN)MDpar.exe < inputdata.txt > /dev/null
+	$< < inputdata.txt > /dev/null
 
 check: $(BIN)checker run
 	$(BIN)checker < expected.txt

@@ -1,7 +1,7 @@
 USERNAME=pg54257
 REMOTE=$USERNAME@s7edu.di.uminho.pt
 EXEC=MDpar
-CPUS=6
+CPUS=40
 
 scp Makefile $REMOTE:~
 scp src/$EXEC.cpp $REMOTE:~/src
