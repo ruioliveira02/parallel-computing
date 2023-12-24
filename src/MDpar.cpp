@@ -28,36 +28,10 @@
 #include<stdlib.h>
 #include<math.h>
 #include<string.h>
-#include<immintrin.h>
 
-typedef __m256d vector;
-#define set1(a) _mm256_set1_pd(a)
-#define add(a,b) _mm256_add_pd(a,b)
-#define add3(a,b,c) _mm256_add_pd(add(a,b),c)
-#define sub(a,b) _mm256_sub_pd(a,b)
-#define mul(a,b) _mm256_mul_pd(a,b)
-#define mul3(a,b,c) _mm256_mul_pd(mul(a,b),c)
-#define div(a,b) _mm256_div_pd(a,b)
-#define load(a) _mm256_load_pd(&a)
-#define store(a,b) _mm256_store_pd(a,b)
-#define storeu(a,b) _mm256_storeu_pd(a,b)
-#define sum(a) (a[0] + a[1] + a[2] + a[3])
-
-/*
-typedef double vector;
-#define set1(a) (a)
-#define add(a,b) (a+b)
-#define sub(a,b) (a-b)
-#define mul(a,b) (a*b)
-#define mul3(a,b,c) (a*b*c)
-#define div(a,b) (a/b)
-#define load(a) (a)
-#define store(a,b) *a=b
-#define storeu(a,b) *a=b
-#define sum(a) (a[0])
-*/
-
-#define VEC_SIZE (sizeof(vector) / sizeof(r[0][0]))
+#ifndef ATOM_COUNT
+#define ATOM_COUNT 5000
+#endif
 
 // Number of particles
 int N;
@@ -237,7 +211,7 @@ int main()
     
     scanf("%lf",&rho);
     
-    N = 5000;
+    N = ATOM_COUNT;
     Vol = N/(rho*NA);
     
     Vol /= VolFac;
@@ -270,6 +244,7 @@ int main()
     ofp = fopen(ofn,"w");     //  Output of other quantities (T, P, gc, etc) at every timestep
     afp = fopen(afn,"w");    //  Average T, P, gc, etc from the simulation
     
+    printf("%p\n", tfp);
     int NumTime;
     if (strcmp(atype,"He")==0) {
         
@@ -294,7 +269,6 @@ int main()
     //  The accellerations of each particle will be defined from the forces and their
     //  mass, and this will allow us to update their positions via Newton's law
     computeAccelerations();
-    
     
     // Print number of particles to the trajectory file
     fprintf(tfp,"%i\n",N);
@@ -486,119 +460,83 @@ double Kinetic() { //Write Function here!
 //   Returns the potential energy of the system
 double computeAccelerations() {
     int i, j, k;
-    double _sigma6 = pow(sigma, 6);
-    double _Pot = 0;
-    vector one = set1(1), twentyFour = set1(24), fourtyEight = set1(48), sigma6 = set1(_sigma6);
-    vector Pot = set1(0);
+    double sigma6 = sigma * sigma * sigma * sigma * sigma * sigma;
+    double Pot = 0;
 
-    for (i = 0; i < N; i++) {  // set all accelerations to zero
+    for (i = 0; i < N; i++) {
         for (k = 0; k < 3; k++) {
             a[k][i] = 0;
         }
     }
 
-    #pragma omp declare reduction(reduct_vector : vector : omp_out = add(omp_out, omp_in)) initializer(omp_priv=omp_orig)
-    #pragma omp parallel
-    {
-        vector ri[3], f, rSqd, rFour, rSix, rEight, ai[3], aj, term1, term2;
-        vector rij[3]; // position of i relative to j
-        __attribute__((aligned(32))) double temp[3][MAXPART];
+    double ri[3], f, rSqd, rFour, rSix, rEight, ai[3], term1, term2;
+    double rij[3]; // position of i relative to j
+    double temp[3][MAXPART];
 
-        for (int i = 0; i < N; i++) {
+    for (int i = 0; i < N; i++) {
+        for (k = 0; k < 3; k++) {
+            temp[k][i] = 0;
+        }
+    }
+
+    for (i = 0; i < N; i++) {   // loop over all distinct pairs i,j
+        for (k=0; k<3; k++) {
+            ri[k] = r[k][i];
+            ai[k] = 0;
+        }
+
+        for (j = i + 1; j < N; j++) {
+            //  component-by-componenent position of i relative to j
+            //rij[k] = r[k][i] - r[k][j];
+            rij[0] = ri[0] - r[0][j];
+            rij[1] = ri[1] - r[1][j];
+            rij[2] = ri[2] - r[2][j];
+
+            //  sum of squares of the components
+            //rSqd += rij[k] * rij[k];
+            rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
+
+            //rSqd = 1 / (rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2]);
+            rSqd = 1 /  rSqd; //r^-2
+
+            rFour = rSqd * rSqd; //r^-4
+
+            rSix = rSqd * rSqd * rSqd; //r^-6
+
+            rEight = rFour * rFour; //r^-8
+            
+            //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
+            //f = (48 * rSix * rEight) - (24 * rEight);
+            f = 48 * rSix * rEight - 24 * rEight;
+
             for (k = 0; k < 3; k++) {
-                temp[k][i] = 0;
+                //  from F = ma, where m = 1 in natural units!
+                rij[k] = rij[k] * f;
+
+                //a[k][i] += rij[k] * f;
+                ai[k] = ai[k] + rij[k];
+
+                //a[k][j] -= rij[k] * f;
+                temp[k][j] = temp[k][j] - rij[k];
             }
+
+            term2 = sigma6 * rSix;
+            term1 = term2 * term2;
+            Pot +=  term1 - term2;
         }
 
-        #pragma omp for reduction(+:_Pot) reduction(reduct_vector:Pot) schedule(dynamic,8)
-        for (i = 0; i < N; i++) {   // loop over all distinct pairs i,j
-            for (k=0; k<3; k++) {
-                ri[k] = set1(r[k][i]);
-                ai[k] = set1(0);
-            }
-            
-            for (j=i+1; j%VEC_SIZE != 0; j++) {
-                double _rij[3], _r2 = 0;
-                for (k=0; k<3; k++) {
-                    _rij[k] = r[k][i] - r[k][j];
-                    _r2 += _rij[k] * _rij[k];
-                }
-                _r2 = 1 / _r2;
-                double _r6 = _r2 * _r2 * _r2;
-                double _r8 = _r6 * _r2;
-                double _f = (48 * _r6 * _r8) - (24 * _r8);
-                for (k=0; k<3; k++) {
-                    temp[k][i] += _rij[k] * _f;
-                    temp[k][j] -= _rij[k] * _f;
-                }
-
-                double _term2 = _sigma6 * _r6;
-                double _term1 = _term2 * _term2;
-                _Pot +=_term1 - _term2;
-            }
-            
-            for (; j < N; j += VEC_SIZE) {
-                //  component-by-componenent position of i relative to j
-                //rij[k] = r[k][i] - r[k][j];
-                rij[0] = sub(ri[0], load(r[0][j]));
-                rij[1] = sub(ri[1], load(r[1][j]));
-                rij[2] = sub(ri[2], load(r[2][j]));
-
-                //  sum of squares of the components
-                //rSqd += rij[k] * rij[k];
-                rSqd = add3(mul(rij[0], rij[0]), mul(rij[1], rij[1]), mul(rij[2], rij[2]));
-
-                //rSqd = 1 / (rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2]);
-                rSqd = div(one, rSqd); //r^-2
-
-                rFour = mul(rSqd, rSqd); //r^-4
-
-                rSix = mul3(rSqd, rSqd, rSqd); //r^-6
-
-                rEight = mul(rFour, rFour); //r^-8
-                
-                //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-                //f = (48 * rSix * rEight) - (24 * rEight);
-                f = sub(mul3(fourtyEight, rSix, rEight), mul(twentyFour, rEight));
-
-                for (k = 0; k < 3; k++) {
-                    //  from F = ma, where m = 1 in natural units!
-                    rij[k] = mul(rij[k], f);
-
-                    //a[k][i] += rij[k] * f;
-                    ai[k] = add(ai[k], rij[k]);
-
-                    //a[k][j] -= rij[k] * f;
-                    aj = sub(load(temp[k][j]), rij[k]);
-                    store(&temp[k][j], aj);
-                }
-
-                term2 = mul(sigma6, rSix);
-                term1 = mul(term2, term2);
-                Pot = add(Pot, sub(term1, term2));
-            }
-
-            for (k=0; k<3; k++) {
-                double aux[VEC_SIZE];
-                storeu(aux, ai[k]);
-                temp[k][i] += sum(aux);
-            }
+        for (k=0; k<3; k++) {
+            temp[k][i] += ai[k];
         }
 
-        #pragma omp critical
-        {
-            for(int i = 0; i < N; i++) {
-                for (int k = 0; k < 3; k++) {
-                    a[k][i] += temp[k][i];
-                }
+        for(int i = 0; i < N; i++) {
+            for (int k = 0; k < 3; k++) {
+                a[k][i] += temp[k][i];
             }
         }
     }
 
-    double aux[VEC_SIZE];
-    storeu(aux, Pot);
-
-    return 8*epsilon*(sum(aux) + _Pot);
+    return 8 * epsilon * Pot;
 }
 
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
