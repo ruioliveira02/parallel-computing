@@ -1,12 +1,11 @@
 #!/bin/sh
+#SBATCH --time=1:00
+#SBATCH --partition=cpar
+#SBATCH --constraint=k20
+#SBATCH -W
 
 METRICS=instructions,cycles,L1-dcache-load-misses
-REPS=3
+REPS=1
 
-for i in {1..40}
-do
-    export OMP_NUM_THREADS=$i
-    echo Threads: $i
-    perf stat -r $REPS -e $METRICS sh -c "bin/MDpar.exe < inputdata.txt > /dev/null"
-done
 
+perf stat -r $REPS -e $METRICS sh -c "bin/MDcuda.exe < inputdata.txt"
