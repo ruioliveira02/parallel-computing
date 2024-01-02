@@ -281,7 +281,7 @@ int main()
     cudaMalloc((void**)&v_gpu, 3 * N * sizeof(double));
     cudaMalloc((void**)&r_gpu, 3 * N * sizeof(double));
     cudaMalloc((void**)&a_gpu, 3 * N * sizeof(double));
-    cudaMalloc((void**)&dPot, N * sizeof(double));
+    cudaMalloc((void**)&dPot, 15000 * sizeof(double)); //FIXME: NON CONST SIZE
     checkCUDAError("mem allocation");
 
     cudaMemcpy(r_gpu, r_cpu, 3 * N * sizeof(double), cudaMemcpyHostToDevice);
@@ -487,22 +487,22 @@ double Kinetic() { //Write Function here!
 }
 
 __global__ void computeAccelerationsKernel(double *a, double *v, double *r, double *Pot) {
+    extern __shared__ double shared_pot[];
+
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     int j, k;
-    double sigma6 = pow(sigma, 6);
+    double sigma6 = sigma * sigma * sigma * sigma * sigma * sigma;
 
+    shared_pot[threadIdx.x] = 0;
+    double acc[3] = { 0.0, 0.0, 0.0 };
     if (i < N) {
-        Pot[i] = 0;
-        for (k = 0; k < 3; k++) {
-            a[3 * i + k] = 0;
-        }
-
+        double ri[3] = { r[3 * i + 0], r[3 * i + 1], r[3 * i + 2] };
         for (j = 0; j < N; j++) {
             if (i != j) {
                 double rij[3], r2 = 0;
                 for (k = 0; k < 3; k++) {
-                    rij[k] = r[3 * i + k] - r[3 * j + k];
+                    rij[k] = ri[k] - r[3 * j + k];
                     r2 += rij[k] * rij[k];
                 }
                 r2 = 1 / r2;
@@ -510,15 +510,29 @@ __global__ void computeAccelerationsKernel(double *a, double *v, double *r, doub
                 double r8 = r6 * r2;
                 double f = (48 * r6 * r8) - (24 * r8);
                 for (k = 0; k < 3; k++) {
-                    a[3 * i + k] += rij[k] * f;
+                    acc[k] += rij[k] * f;
                 }
 
                 double term2 = sigma6 * r6;
                 double term1 = term2 * term2;
-                Pot[i] += term1 - term2;
+                shared_pot[threadIdx.x] += term1 - term2;
             }
         }
+        for(int k = 0; k < 3; k++)
+            a[3 * i + k] = acc[k];
     }
+
+    __syncthreads();
+
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (threadIdx.x < s) {
+            shared_pot[threadIdx.x] += shared_pot[threadIdx.x + s];
+        }
+        __syncthreads();
+    }
+
+    if(threadIdx.x == 0)
+        Pot[blockIdx.x] = shared_pot[0];
 }
 
 void copyInput() {
@@ -526,16 +540,16 @@ void copyInput() {
     checkCUDAError("memcpy h->d");
 }
 
-double copyOutput() {
+double copyOutput(int num_blocks) {
 
     // copy the output to the host
-    double  Pot_aux[N];
+    double Pot_aux[num_blocks];
     cudaMemcpy(a_cpu, a_gpu, 3 * N * sizeof(double), cudaMemcpyDeviceToHost);
-    cudaMemcpy(Pot_aux, dPot, N * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaMemcpy(Pot_aux, dPot, num_blocks * sizeof(double), cudaMemcpyDeviceToHost);
     checkCUDAError("memcpy d->h");
 
     double Pot = 0;
-    for (int i = 0; i < N; i++) {
+    for (int i = 0; i < num_blocks; i++) {
         Pot += Pot_aux[i];
     }
 
@@ -550,10 +564,10 @@ double computeAccelerations() {
     // launch the kernel
     const int threads_per_block = 256;
     int num_blocks = (N + threads_per_block - 1) / threads_per_block;
-    computeAccelerationsKernel << < threads_per_block, num_blocks >> > (a_gpu, v_gpu, r_gpu, dPot);
+    computeAccelerationsKernel << < num_blocks, threads_per_block, threads_per_block * sizeof(double) >> > (a_gpu, v_gpu, r_gpu, dPot);
     checkCUDAError("kernel invocation");
 
-    return 4 * epsilon * copyOutput();
+    return 4 * epsilon * copyOutput(num_blocks);
 }
 
 
@@ -603,22 +617,16 @@ double VelocityVerlet(double dt, int iter, FILE* fp, double* potential) {
 
     const int threads_per_block = 64;
     int num_blocks = (3 * N + threads_per_block - 1) / threads_per_block;
-    updatePositionsKernel <<< threads_per_block, num_blocks  >>> (a_gpu, v_gpu, r_gpu, dt);
+    updatePositionsKernel <<< num_blocks, threads_per_block  >>> (a_gpu, v_gpu, r_gpu, dt);
 
     //  Update accellerations from updated positions
     *potential = computeAccelerations();
 
-    updateVelocityKernel <<< threads_per_block, num_blocks >>> (a_gpu, v_gpu, r_gpu, dt, L);
+    updateVelocityKernel <<< num_blocks, threads_per_block >>> (a_gpu, v_gpu, r_gpu, dt, L);
 
     cudaMemcpy(r_cpu, r_gpu, 3 * N * sizeof(double), cudaMemcpyDeviceToHost);
     cudaMemcpy(v_cpu, v_gpu, 3 * N * sizeof(double), cudaMemcpyDeviceToHost);
     cudaMemcpy(a_cpu, a_gpu, 3 * N * sizeof(double), cudaMemcpyDeviceToHost);
-
-    /*for (i = 0; i < N; i++) {
-        for (k = 0; k < 3; k++) {
-            v_cpu[3 * i + k] += 0.5 * a_cpu[3 * i + k] * dt;
-        }
-    }*/
 
     for (int i = 0; i < 3 * N; i++) {
         if (r_cpu[i] < 0.) {
