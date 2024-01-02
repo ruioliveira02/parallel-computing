@@ -35,7 +35,17 @@
 #include <cuda_runtime.h>
 
  // Number of particles
+#ifndef N
 #define N 5000
+#endif
+
+#ifndef ITERATION_COUNT
+#define ITERATION_COUNT 200
+#endif
+
+#ifndef THREADS_PER_BLOCK
+#define THREADS_PER_BLOCK 64
+#endif
 
 //  Lennard-Jones parameters in natural units!
 #define sigma 1
@@ -265,7 +275,7 @@ int main()
     }
     else {
         dt = 0.5e-14 / timefac;
-        NumTime = 200;
+        NumTime = ITERATION_COUNT;
 
     }
 
@@ -562,9 +572,8 @@ double copyOutput(int num_blocks) {
 //   Returns the potential energy of the system
 double computeAccelerations() {
     // launch the kernel
-    const int threads_per_block = 256;
-    int num_blocks = (N + threads_per_block - 1) / threads_per_block;
-    computeAccelerationsKernel << < num_blocks, threads_per_block, threads_per_block * sizeof(double) >> > (a_gpu, v_gpu, r_gpu, dPot);
+    int num_blocks = (N + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+    computeAccelerationsKernel << < num_blocks, THREADS_PER_BLOCK, THREADS_PER_BLOCK * sizeof(double) >> > (a_gpu, v_gpu, r_gpu, dPot);
     checkCUDAError("kernel invocation");
 
     return 4 * epsilon * copyOutput(num_blocks);
@@ -614,15 +623,13 @@ double VelocityVerlet(double dt, int iter, FILE* fp, double* potential) {
     cudaMemcpy(v_gpu, v_cpu, 3 * N * sizeof(double), cudaMemcpyHostToDevice);
     cudaMemcpy(a_gpu, a_cpu, 3 * N * sizeof(double), cudaMemcpyHostToDevice);
 
-
-    const int threads_per_block = 64;
-    int num_blocks = (3 * N + threads_per_block - 1) / threads_per_block;
-    updatePositionsKernel <<< num_blocks, threads_per_block  >>> (a_gpu, v_gpu, r_gpu, dt);
+    int num_blocks = (3 * N + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+    updatePositionsKernel <<< num_blocks, THREADS_PER_BLOCK  >>> (a_gpu, v_gpu, r_gpu, dt);
 
     //  Update accellerations from updated positions
     *potential = computeAccelerations();
 
-    updateVelocityKernel <<< num_blocks, threads_per_block >>> (a_gpu, v_gpu, r_gpu, dt, L);
+    updateVelocityKernel <<< num_blocks, THREADS_PER_BLOCK >>> (a_gpu, v_gpu, r_gpu, dt, L);
 
     cudaMemcpy(r_cpu, r_gpu, 3 * N * sizeof(double), cudaMemcpyDeviceToHost);
     cudaMemcpy(v_cpu, v_gpu, 3 * N * sizeof(double), cudaMemcpyDeviceToHost);
