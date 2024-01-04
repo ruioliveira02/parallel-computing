@@ -63,7 +63,7 @@ double L;
 double Tinit;  //2;
 //  Vectors!
 //
-const int MAXPART = 5004;
+const int MAXPART = 100000;
 double* v_cpu, * r_cpu, * a_cpu;
 // pointers to the device memory
 double *v_gpu, *r_gpu, *a_gpu, * dPot;

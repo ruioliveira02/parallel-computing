@@ -31,13 +31,13 @@ run_program_multiple_times() {
 }
 
 # List of possible values for each individual argument
-n_values=("5000" "1000")
+n_values=("1000" "10000" "20000" "30000" "40000" "50000" "60000" "70000" "80000" "90000" "100000")
 iteration_values=("200")
-thread_values=("64" "128")
+thread_values=("256")
 # Add more values as needed
 
 # Number of times to run the program for each set of arguments
-repetitions_per_set=1
+repetitions_per_set=3
 
 echo "Repetition;N;Iteration Count;Threads Per Block;Real Time; User Time; Sys Time" >  results.csv
 
